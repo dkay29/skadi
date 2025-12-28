@@ -2,6 +2,7 @@ package com.dkay229.skadi.aws.s3;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
 import org.springframework.stereotype.Service;
 import software.amazon.awssdk.core.ResponseInputStream;
 import software.amazon.awssdk.core.sync.RequestBody;
@@ -18,6 +19,7 @@ import java.net.URL;
 import java.time.Duration;
 import java.util.*;
 
+@Component
 @Service
 public class AwsSdkS3AccessLayer implements S3AccessLayer {
     private static final Logger logger = LoggerFactory.getLogger(AwsSdkS3AccessLayer.class);
@@ -40,6 +42,7 @@ public class AwsSdkS3AccessLayer implements S3AccessLayer {
             if (userMetadata != null && !userMetadata.isEmpty()) req = req.metadata(userMetadata);
 
             PutObjectResponse resp = s3.putObject(req.build(), RequestBody.fromBytes(bytes));
+            logger.info("S3 putBytes succeeded for s3://{}/{} ETag={}", ref.bucket(), ref.key(), resp.eTag());
             return resp.eTag();
         } catch (S3Exception e) {
             logger.error("S3 putBytes failed for s3://{}/{}", ref.bucket(), ref.key(), e);
@@ -57,6 +60,7 @@ public class AwsSdkS3AccessLayer implements S3AccessLayer {
             if (userMetadata != null && !userMetadata.isEmpty()) req = req.metadata(userMetadata);
 
             PutObjectResponse resp = s3.putObject(req.build(), RequestBody.fromInputStream(in, contentLength));
+            logger.info("S3 putStream succeeded for s3://{}/{} ETag={}", ref.bucket(), ref.key(), resp.eTag());
             return resp.eTag();
         } catch (S3Exception e) {
             logger.error("S3 putStream failed for s3://{}/{}", ref.bucket(), ref.key(), e);
@@ -69,6 +73,7 @@ public class AwsSdkS3AccessLayer implements S3AccessLayer {
         try (ResponseInputStream<GetObjectResponse> ris = s3.getObject(
                 GetObjectRequest.builder().bucket(ref.bucket()).key(ref.key()).build()
         )) {
+            logger.info("S3 getBytes succeeded for s3://{}/{}", ref.bucket(), ref.key());
             return readAllBytes(ris);
         } catch (NoSuchKeyException e) {
             logger.error("S3 object not found for getBytes s3://{}/{}", ref.bucket(), ref.key(), e);
@@ -78,10 +83,12 @@ public class AwsSdkS3AccessLayer implements S3AccessLayer {
         }
     }
 
+
     @Override
     public InputStream getStream(S3Models.ObjectRef ref) {
         try {
             // Caller must close
+            logger.info("S3 getStream succeeded for s3://{}/{}", ref.bucket(), ref.key());
             return s3.getObject(GetObjectRequest.builder().bucket(ref.bucket()).key(ref.key()).build());
         } catch (S3Exception e) {
             logger.error("S3 getStream failed for s3://{}/{}", ref.bucket(), ref.key(), e);
@@ -96,7 +103,7 @@ public class AwsSdkS3AccessLayer implements S3AccessLayer {
                     .bucket(ref.bucket())
                     .key(ref.key())
                     .build());
-
+            logger.info("S3 head succeeded for s3://{}/{}", ref.bucket(), ref.key());
             return Optional.of(new S3Models.ObjectMetadata(
                     ref.bucket(),
                     ref.key(),
@@ -148,6 +155,7 @@ public class AwsSdkS3AccessLayer implements S3AccessLayer {
                     .destinationBucket(to.bucket())
                     .destinationKey(to.key())
                     .build());
+            logger.error("S3 copy succeeded from s3://{}/{} to s3://{}/{}", from.bucket(), from.key(), to.bucket(), to.key());
             // CopyObjectResponse doesn't always carry ETag uniformly; use head if you need final ETag
             return resp.copyObjectResult() != null ? resp.copyObjectResult().eTag() : "";
         } catch (S3Exception e) {
@@ -172,6 +180,7 @@ public class AwsSdkS3AccessLayer implements S3AccessLayer {
                     out.add(new S3Models.ListItem(o.key(), o.size(), o.eTag(), o.lastModified()));
                 }
             }
+            logger.info("S3 list succeeded for bucket={} prefix={} returned {} items", bucket, prefix, out.size());
             return out;
         } catch (S3Exception e) {
             logger.error("S3 list failed for bucket={} prefix={}", bucket, prefix, e);
@@ -191,6 +200,7 @@ public class AwsSdkS3AccessLayer implements S3AccessLayer {
                     .signatureDuration(ttl == null ? Duration.ofMinutes(10) : ttl)
                     .getObjectRequest(getReq)
             );
+            logger.info("S3 presignGet succeeded for s3://{}/{}", ref.bucket(), ref.key());
             return presigned.url();
         } catch (Exception e) {
             logger.error("S3 presignGet failed for s3://{}/{}", ref.bucket(), ref.key(), e);
@@ -213,6 +223,7 @@ public class AwsSdkS3AccessLayer implements S3AccessLayer {
                     .signatureDuration(ttl == null ? Duration.ofMinutes(10) : ttl)
                     .putObjectRequest(putReqFinal.build())
             );
+            logger.info("S3 presignPut succeeded for s3://{}/{}", ref.bucket(), ref.key());
             return presigned.url();
         } catch (Exception e) {
             logger.error("S3 presignPut failed for s3://{}/{}", ref.bucket(), ref.key(), e);
@@ -261,7 +272,7 @@ public class AwsSdkS3AccessLayer implements S3AccessLayer {
                 bytesRemaining -= buf.length;
                 partNumber++;
             }
-
+            logger.info("S3 multipartUpload uploadParts succeeded for s3://{}/{} uploaded {} parts", ref.bucket(), ref.key(), completed.size());
             CompleteMultipartUploadResponse done = s3.completeMultipartUpload(CompleteMultipartUploadRequest.builder()
                     .bucket(ref.bucket())
                     .key(ref.key())
@@ -291,6 +302,7 @@ public class AwsSdkS3AccessLayer implements S3AccessLayer {
         byte[] buf = new byte[8192];
         int r;
         while ((r = in.read(buf)) != -1) baos.write(buf, 0, r);
+        logger.info("S3 readAllBytes read {} bytes", baos.size());
         return baos.toByteArray();
     }
 
@@ -306,6 +318,7 @@ public class AwsSdkS3AccessLayer implements S3AccessLayer {
             off += r;
         }
         if (off == target) return out;
+        logger.info("S3 readExactly read fewer bytes than requested: requested={} got={}", target, off);
         return Arrays.copyOf(out, off); // last part might be smaller if upstream lied about length
     }
 }
