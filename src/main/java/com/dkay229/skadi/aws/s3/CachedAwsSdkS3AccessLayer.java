@@ -3,12 +3,16 @@ package com.dkay229.skadi.aws.s3;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.*;
+import java.io.IOException;
+import java.io.InputStream;
 import java.net.URL;
-import java.nio.file.*;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
-import java.util.*;
-import java.util.stream.Collectors;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 
 public class CachedAwsSdkS3AccessLayer implements S3AccessLayer {
     private static final Logger logger = LoggerFactory.getLogger(CachedAwsSdkS3AccessLayer.class);
@@ -66,10 +70,11 @@ public class CachedAwsSdkS3AccessLayer implements S3AccessLayer {
             Optional<Path> oldestFile = getOldestCacheFile();
             if (oldestFile.isPresent()) {
                 try {
-                    long fileSize = Files.size(oldestFile.get());
-                    Files.delete(oldestFile.get());
+                    Path fileToEvict = oldestFile.get();
+                    long fileSize = Files.size(fileToEvict);
+                    Files.delete(fileToEvict);
                     currentCacheSize -= fileSize;
-                    logger.info("Evicted cache file: {}", oldestFile.get());
+                    logger.info("Evicted cache file: {} (size: {} bytes)", fileToEvict, fileSize);
                 } catch (IOException e) {
                     logger.warn("Failed to evict cache file: {}", oldestFile.get(), e);
                 }
@@ -85,6 +90,7 @@ public class CachedAwsSdkS3AccessLayer implements S3AccessLayer {
             return Files.list(cacheDir)
                     .filter(Files::isRegularFile)
                     .sorted(Comparator.comparingLong(this::getFileCreationTime))
+                    .peek(file -> logger.debug("Eviction candidate: {}", file))
                     .findFirst();
         } catch (IOException e) {
             logger.warn("Failed to list cache files for eviction", e);
