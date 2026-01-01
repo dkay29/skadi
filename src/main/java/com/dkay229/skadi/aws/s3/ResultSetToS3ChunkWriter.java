@@ -51,6 +51,7 @@ public class ResultSetToS3ChunkWriter {
             S3WritePlan plan,
             StreamOptions opt
     ) throws Exception {
+
         logger.info("Starting ResultSet->S3 chunked write: runId={}, bucket={}, prefix={}",
                 plan.runId(), plan.bucket(), plan.prefix()
         );
@@ -169,7 +170,7 @@ public class ResultSetToS3ChunkWriter {
                 chunks
         );
 
-        byte[] manifestBytes = opt.manifestWriter().write(manifest);
+        byte[] manifestBytes = opt.manifestSerializer().write(manifest);
         S3Models.ObjectRef manifestRef = plan.manifestRef();
         s3.putBytes(manifestRef, manifestBytes, "application/json", Map.of());
 
@@ -276,27 +277,89 @@ public class ResultSetToS3ChunkWriter {
         String fileExtension(boolean compressed);
     }
 
-    public record StreamOptions(
-            int jdbcFetchSize,
-            int uploadThreads,
-            int maxInFlightChunks,
-            int maxInFlightBytes,
-            int targetChunkBytes,
-            boolean compress,
-            RowEncoder rowEncoder,
-            ManifestWriter manifestWriter
-    ) {
+
+    public static final class StreamOptions {
+        private final int jdbcFetchSize;
+        private final int uploadThreads;
+        private final int maxInFlightChunks;
+        private final int maxInFlightBytes;
+        private final int targetChunkBytes;
+        private final boolean compress;
+        private final RowEncoder rowEncoder;
+        private final ManifestWriter manifestSerializer;
+        private final int uploadRetries;
+        private final int multipartThresholdBytes;
+
+        public StreamOptions(
+                int jdbcFetchSize,
+                int uploadThreads,
+                int maxInFlightChunks,
+                int maxInFlightBytes,
+                int targetChunkBytes,
+                boolean compress,
+                RowEncoder rowEncoder,
+                ManifestWriter manifestSerializer,
+                int uploadRetries,
+                int multipartThresholdBytes
+        ) {
+            if (uploadThreads <= 0) {
+                throw new IllegalArgumentException("uploadThreads must be > 0");
+            }
+            if (maxInFlightChunks <= 0) {
+                throw new IllegalArgumentException("maxInFlightChunks must be > 0");
+            }
+            if (targetChunkBytes <= 0) {
+                throw new IllegalArgumentException("targetChunkBytes must be > 0");
+            }
+            if (maxInFlightBytes <= 0) {
+                throw new IllegalArgumentException("maxInFlightBytes must be > 0");
+            }
+            if (maxInFlightBytes < targetChunkBytes) {
+                throw new IllegalArgumentException(
+                        "maxInFlightBytes (" + maxInFlightBytes + ") must be >= targetChunkBytes (" + targetChunkBytes + ")"
+                );
+            }
+            this.jdbcFetchSize = jdbcFetchSize;
+            this.uploadThreads = uploadThreads;
+            this.maxInFlightChunks = maxInFlightChunks;
+            this.maxInFlightBytes = maxInFlightBytes;
+            this.targetChunkBytes = targetChunkBytes;
+            this.compress = compress;
+            this.rowEncoder = java.util.Objects.requireNonNull(rowEncoder, "rowEncoder");
+            this.manifestSerializer = java.util.Objects.requireNonNull(manifestSerializer, "manifestSerializer");
+            this.uploadRetries = uploadRetries;
+            this.multipartThresholdBytes = multipartThresholdBytes;
+        }
+
         public static StreamOptions defaults() {
             return new StreamOptions(
-                    1000,
-                    4,
-                    16,
-                    64 * 1024 * 1024,
-                    8 * 1024 * 1024,
-                    true,
-                    new JsonLinesRowEncoder(),
-                    new DefaultManifestWriter()
+                    1_000,                          // jdbcFetchSize
+                    2,                              // uploadThreads
+                    4,                              // maxInFlightChunks
+                    16 * 1024 * 1024,               // maxInFlightBytes (16 MiB)
+                    4 * 1024 * 1024,                // targetChunkBytes (4 MiB)
+                    true,                           // compress
+                    new ResultSetToS3ChunkWriter.JsonLinesRowEncoder(),         // or whatever default encoder you use
+                    new ResultSetToS3ChunkWriter.DefaultManifestWriter(),          // or your actual default manifest writer
+                    3,                              // uploadRetries
+                    5 * 1024 * 1024                 // multipartThresholdBytes
             );
+        }
+
+        public int jdbcFetchSize() { return jdbcFetchSize; }
+        public int uploadThreads() { return uploadThreads; }
+        public int maxInFlightChunks() { return maxInFlightChunks; }
+        public int maxInFlightBytes() { return maxInFlightBytes; }
+        public int targetChunkBytes() { return targetChunkBytes; }
+        public boolean compress() { return compress; }
+        public RowEncoder rowEncoder() { return rowEncoder; }
+        public ManifestWriter manifestSerializer() { return manifestSerializer; }
+        public int uploadRetries() { return uploadRetries; }
+        public int useMultipartAboveBytes() { return multipartThresholdBytes; }
+
+        public long retryBackoffMillis(int attempt) {
+            // simple exponential backoff, adjust as needed
+            return Math.min(30_000L, 500L * (1L << Math.max(0, attempt - 1)));
         }
     }
 
