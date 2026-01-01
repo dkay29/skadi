@@ -9,7 +9,6 @@ import java.util.regex.Pattern;
 public class DataSizeExpressionEvaluator {
     public static long evaluate(String expression) {
         List<String> tokens = tokenize(expression);
-        System.out.println(tokens);
         BigDecimal result = BigDecimal.ONE;
         for (String token : tokens) {
             if (token.equals("*") || token.equals("L")) {

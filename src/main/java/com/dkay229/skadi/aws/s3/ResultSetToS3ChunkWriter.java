@@ -63,6 +63,7 @@ public class ResultSetToS3ChunkWriter {
         // Backpressure: (1) bounded queue of chunks, (2) bounded bytes in-flight.
         BlockingQueue<SealedChunk> queue = new ArrayBlockingQueue<>(opt.maxInFlightChunks());
         Semaphore inflightBytes = new Semaphore(opt.maxInFlightBytes());
+        AtomicReference<Throwable> firstError = new AtomicReference<>(null);
 
         ExecutorService uploadPool = Executors.newFixedThreadPool(opt.uploadThreads(), r -> {
             Thread t = new Thread(r, "skadi-s3-upload");
@@ -70,14 +71,12 @@ public class ResultSetToS3ChunkWriter {
             return t;
         });
 
-        AtomicReference<Throwable> firstError = new AtomicReference<>(null);
         List<ChunkDescriptor> chunks = Collections.synchronizedList(new ArrayList<>());
-
-        // Start N uploader workers
         List<Future<?>> workers = new ArrayList<>();
         for (int i = 0; i < opt.uploadThreads(); i++) {
+            int workerId = i;
             workers.add(uploadPool.submit(() ->
-                    uploaderLoop(plan, opt, queue, inflightBytes, chunks, firstError)
+                    uploaderLoop(plan, opt, queue, inflightBytes, chunks, firstError, workerId)
             ));
         }
 
@@ -87,15 +86,10 @@ public class ResultSetToS3ChunkWriter {
 
         try (PreparedStatement ps = conn.prepareStatement(sql, ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY)) {
             ps.setFetchSize(opt.jdbcFetchSize());
-
-            // Some drivers (e.g., Postgres) require this for streaming:
-            // conn.setAutoCommit(false);
-
             try (ResultSet rs = ps.executeQuery()) {
                 RowEncoder encoder = opt.rowEncoder();
-
                 ChunkBuilder builder = new ChunkBuilder(opt.targetChunkBytes());
-                logger.info("Processing ResultSet and building chunks...");
+
                 while (rs.next()) {
                     encoder.writeRow(rs, builder.out());
                     totalRows++;
@@ -116,9 +110,7 @@ public class ResultSetToS3ChunkWriter {
                         totalUncompressedBytes += sealed.uncompressedBytes;
                     }
                 }
-                logger.info("wrote {} rows into {} part", totalRows, part);
 
-                // Flush trailing partial
                 if (builder.size() > 0) {
                     part++;
                     SealedChunk sealed = builder.seal(
@@ -138,15 +130,15 @@ public class ResultSetToS3ChunkWriter {
             firstError.compareAndSet(null, t);
             throw t;
         } finally {
-            // Poison pills to stop workers
+            // signal workers to stop
             for (int i = 0; i < opt.uploadThreads(); i++) {
                 queue.offer(SealedChunk.poison());
             }
 
             uploadPool.shutdown();
-
             for (Future<?> f : workers) {
                 try {
+                    // wait "forever" now that we know workers can exit cleanly
                     f.get();
                 } catch (Exception e) {
                     firstError.compareAndSet(null, e);
@@ -159,7 +151,6 @@ public class ResultSetToS3ChunkWriter {
             throw (err instanceof Exception) ? (Exception) err : new RuntimeException(err);
         }
 
-        // Build & upload manifest last
         Manifest manifest = new Manifest(
                 plan.runId(),
                 plan.bucket(),
@@ -174,10 +165,6 @@ public class ResultSetToS3ChunkWriter {
         S3Models.ObjectRef manifestRef = plan.manifestRef();
         s3.putBytes(manifestRef, manifestBytes, "application/json", Map.of());
 
-        logger.info("Completed ResultSet->S3 write: rows={}, chunks={}, manifest=s3://{}/{}",
-                totalRows, chunks.size(), manifestRef.bucket(), manifestRef.key()
-        );
-
         return new S3ResultSetRef(
                 plan.bucket(),
                 plan.prefix(),
@@ -187,47 +174,69 @@ public class ResultSetToS3ChunkWriter {
                 chunks.size()
         );
     }
-
     private void uploaderLoop(
             S3WritePlan plan,
             StreamOptions opt,
             BlockingQueue<SealedChunk> queue,
             Semaphore inflightBytes,
             List<ChunkDescriptor> chunks,
-            AtomicReference<Throwable> firstError
+            AtomicReference<Throwable> firstError,
+            int workerId
     ) {
-        while (true) {
-            SealedChunk chunk;
-            try {
-                chunk = queue.take();
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                return;
+        int emptyPolls = 0;
+        final int maxEmptyPolls = 5;
+
+        try {
+            while (true) {
+                if (firstError.get() != null) {
+                    return;
+                }
+
+                SealedChunk chunk;
+                try {
+                    chunk = queue.poll(1, TimeUnit.SECONDS);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+
+                if (chunk == null) {
+                    emptyPolls++;
+                    if (emptyPolls >= maxEmptyPolls) {
+                        // assume producer is done and poison already sent or no more work
+                        return;
+                    }
+                    continue;
+                }
+                emptyPolls = 0;
+
+                if (chunk.poison) {
+                    return;
+                }
+
+                try {
+                    Map<String, String> userMeta = new HashMap<>();
+                    userMeta.put("skadi-runId", plan.runId());
+                    userMeta.put("skadi-part", String.valueOf(chunk.part));
+
+                    String etag = s3.putBytes(chunk.ref, chunk.payload, chunk.contentType, userMeta);
+
+                    chunks.add(new ChunkDescriptor(
+                            chunk.part,
+                            chunk.ref.key(),
+                            chunk.payload.length,
+                            chunk.uncompressedBytes,
+                            etag
+                    ));
+                } catch (Throwable t) {
+                    firstError.compareAndSet(null, t);
+                    return;
+                } finally {
+                    inflightBytes.release(chunk.payload.length);
+                }
             }
-
-            if (chunk.poison) return;
-            if (firstError.get() != null) return;
-
-            try {
-                Map<String, String> userMeta = new HashMap<>();
-                userMeta.put("skadi-runId", plan.runId());
-                userMeta.put("skadi-part", String.valueOf(chunk.part));
-
-                String etag = s3.putBytes(chunk.ref, chunk.payload, chunk.contentType, userMeta);
-
-                chunks.add(new ChunkDescriptor(
-                        chunk.part,
-                        chunk.ref.key(),
-                        chunk.payload.length,
-                        chunk.uncompressedBytes,
-                        etag
-                ));
-            } catch (Throwable t) {
-                firstError.compareAndSet(null, t);
-                return;
-            } finally {
-                inflightBytes.release(chunk.payload.length);
-            }
+        } finally {
+            // nothing extra
         }
     }
 

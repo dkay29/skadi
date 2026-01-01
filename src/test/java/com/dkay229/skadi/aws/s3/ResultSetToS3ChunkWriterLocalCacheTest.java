@@ -78,6 +78,7 @@ public class ResultSetToS3ChunkWriterLocalCacheTest {
         }
     }
 
+
     private static Path expectedCachePath(Path cacheRoot, S3Models.ObjectRef ref) {
         String id = CacheKeyUtil.cacheId(ref.bucket(), ref.key());
         return cacheRoot.resolve(id.substring(0, 2)).resolve(id + ".bin");
