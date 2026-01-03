@@ -1,7 +1,5 @@
 package com.dkay229.skadi.s3.spi;
 
-import com.dkay229.skadi.s3.spi.S3ClientContext;
-import com.dkay229.skadi.s3.spi.S3ClientProvider;
 import software.amazon.awssdk.services.s3.S3Client;
 
 import java.util.Comparator;

@@ -1,7 +1,5 @@
 package com.dkay229.skadi.s3.spi;
 
-import com.dkay229.skadi.s3.spi.S3ClientContext;
-import com.dkay229.skadi.s3.spi.S3ClientProvider;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import software.amazon.awssdk.services.s3.S3Client;
