@@ -132,6 +132,7 @@ public class CachedAwsSdkS3AccessLayer implements S3AccessLayer {
                     metadataMap.computeIfAbsent(cacheFile, p -> new CacheMetadata()).addAccessTime();
                     validateMetaOrWarn(ref, cacheFile);
                     touch(cacheFile);
+                    CacheFetchContext.set(CacheFetchContext.Source.LOCAL);
                     return Files.newInputStream(cacheFile);
                 } catch (IOException e) {
                     logger.warn("Failed to open cached stream: {}", cacheFile, e);
@@ -144,6 +145,7 @@ public class CachedAwsSdkS3AccessLayer implements S3AccessLayer {
                     logger.info("Peer cache hit (pulled locally) for s3://{}/{}", ref.bucket(), ref.key());
                     metadataMap.computeIfAbsent(cacheFile, p -> new CacheMetadata()).addAccessTime();
                     touch(cacheFile);
+                    CacheFetchContext.set(CacheFetchContext.Source.PEER);
                     return Files.newInputStream(cacheFile);
                 } catch (IOException e) {
                     logger.warn("Failed to open cached stream after peer pull: {}", cacheFile, e);
@@ -155,6 +157,7 @@ public class CachedAwsSdkS3AccessLayer implements S3AccessLayer {
                 pullFromS3ToLocal(ref, cacheFile);
                 metadataMap.computeIfAbsent(cacheFile, p -> new CacheMetadata()).addAccessTime();
                 touch(cacheFile);
+                CacheFetchContext.set(CacheFetchContext.Source.S3);
                 return Files.newInputStream(cacheFile);
             } catch (IOException e) {
                 throw new RuntimeException("Failed to fetch and cache s3://" + ref.bucket() + "/" + ref.key(), e);

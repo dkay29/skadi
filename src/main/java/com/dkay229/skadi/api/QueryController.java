@@ -1,11 +1,13 @@
 package com.dkay229.skadi.api;
 
+import com.dkay229.skadi.aws.s3.CacheFetchContext;
 import com.dkay229.skadi.aws.s3.ResultSetToS3ChunkWriter;
 import com.dkay229.skadi.aws.s3.S3AccessLayer;
 import com.dkay229.skadi.aws.s3.S3Models;
 import com.dkay229.skadi.query.ManifestReader;
 import com.dkay229.skadi.query.QueryModels;
 import com.dkay229.skadi.query.QueryService;
+import com.dkay229.skadi.query.QueryStatsRegistry;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -23,11 +25,14 @@ public class QueryController {
     private final QueryService queryService;
     private final ManifestReader manifestReader;
     private final S3AccessLayer s3;
+    private final QueryStatsRegistry stats;
 
-    public QueryController(QueryService queryService, ManifestReader manifestReader, S3AccessLayer s3) {
+
+    public QueryController(QueryService queryService, ManifestReader manifestReader, S3AccessLayer s3,QueryStatsRegistry stats) {
         this.queryService = Objects.requireNonNull(queryService);
         this.manifestReader = Objects.requireNonNull(manifestReader);
         this.s3 = Objects.requireNonNull(s3);
+        this.stats = Objects.requireNonNull(stats);
     }
 
     @PostMapping
@@ -69,7 +74,7 @@ public class QueryController {
         }
         StreamingResponseBody body = out -> {
             try {
-                streamObject(st.ref().bucket(), cd.key(), out);
+                streamObject(st.ref().bucket(), cd.key(), out,queryId);
             } catch (Exception e) {
                 throw new IOException("Streaming failed", e);
             }
@@ -91,7 +96,7 @@ public class QueryController {
 
         StreamingResponseBody body = out -> {
             for (ResultSetToS3ChunkWriter.ChunkDescriptor cd : m.chunks()) {
-                streamObject(st.ref().bucket(), cd.key(), out); // now only throws IOException
+                streamObject(st.ref().bucket(), cd.key(), out,queryId); // now only throws IOException
             }
         };
 
@@ -102,8 +107,11 @@ public class QueryController {
     }
 
 
-    private void streamObject(String bucket, String key, OutputStream out) throws IOException {
+    private void streamObject(String bucket, String key, OutputStream out,String queryId) throws IOException {
+        CacheFetchContext.Source src = CacheFetchContext.Source.UNKNOWN;
+        long bytes = 0;
         try (InputStream in = s3.getStream(new S3Models.ObjectRef(bucket, key))) {
+            src = CacheFetchContext.getAndClear();
             byte[] buf = new byte[1024 * 128];
             int r;
             while ((r = in.read(buf)) >= 0) {
@@ -116,6 +124,8 @@ public class QueryController {
         } catch (Exception e) {
             // Any checked exception from s3.getStream gets converted to IOException
             throw new IOException("Failed streaming s3://" + bucket + "/" + key, e);
+        } finally {
+            stats.recordServe(queryId, bytes, src);
         }
     }
 
