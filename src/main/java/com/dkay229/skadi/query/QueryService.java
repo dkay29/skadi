@@ -3,12 +3,12 @@ package com.dkay229.skadi.query;
 import com.dkay229.skadi.aws.s3.ResultSetToS3ChunkWriter;
 import com.dkay229.skadi.aws.s3.S3AccessLayer;
 import com.dkay229.skadi.aws.s3.S3Models;
+import com.dkay229.skadi.jdbc.spi.JdbcClientFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.sql.Connection;
-import java.sql.DriverManager;
 import java.time.Instant;
 import java.util.Map;
 import java.util.Objects;
@@ -25,6 +25,7 @@ public class QueryService {
     private final QueryRegistry registry;
     private final ManifestReader manifestReader;
     private final ExecutorService queryExecutor;
+    private final JdbcClientFactory jdbcClientFactory;
 
     public QueryService(QueryCacheProperties props,
                         ResultSetToS3ChunkWriter writer,
@@ -32,7 +33,8 @@ public class QueryService {
                         S3LockService lockService,
                         QueryRegistry registry,
                         ManifestReader manifestReader,
-                        ExecutorService queryExecutor) {
+                        ExecutorService queryExecutor,
+                        JdbcClientFactory jdbcClientFactory) {
         this.props = Objects.requireNonNull(props);
         this.writer = Objects.requireNonNull(writer);
         this.s3 = Objects.requireNonNull(s3);
@@ -40,6 +42,7 @@ public class QueryService {
         this.registry = Objects.requireNonNull(registry);
         this.manifestReader = Objects.requireNonNull(manifestReader);
         this.queryExecutor = Objects.requireNonNull(queryExecutor);
+        this.jdbcClientFactory = Objects.requireNonNull(jdbcClientFactory);
     }
 
     public QueryModels.QueryResponse submit(QueryModels.QueryRequest req) throws Exception {
@@ -154,17 +157,10 @@ public class QueryService {
             );
         }
 
-        try (Connection conn = openConnection(jdbc)) {
+        try (Connection conn = jdbcClientFactory.openConnection(jdbc)) {
             ResultSetToS3ChunkWriter.S3ResultSetRef ref = writer.write(conn, sql, plan, opt);
             registry.put(queryId, QueryModels.Status.DONE, ref, null);
         }
-    }
-
-    private Connection openConnection(QueryModels.QueryRequest.Jdbc jdbc) throws Exception {
-        if (jdbc.username() != null && !jdbc.username().isBlank()) {
-            return DriverManager.getConnection(jdbc.jdbcUrl(), jdbc.username(), jdbc.password());
-        }
-        return DriverManager.getConnection(jdbc.jdbcUrl());
     }
 
     private ResultSetToS3ChunkWriter.S3ResultSetRef loadRefFromManifestOrFallback(ResultSetToS3ChunkWriter.S3WritePlan plan) {

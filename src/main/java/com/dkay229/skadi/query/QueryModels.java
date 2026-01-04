@@ -32,11 +32,28 @@ public final class QueryModels {
             Cache cache
     ) {
         public record Jdbc(
+                /**
+                 * Legacy mode (backward compatible): provide full JDBC URL + optional username/password.
+                 *
+                 * Prefer {@link #datasourceId()} for corporate deployments.
+                 */
                 String jdbcUrl,
                 String username,
                 String password,
                 String sql,
-                List<String> params
+                List<String> params,
+
+                /**
+                 * Preferred mode: a server-configured datasource identity (e.g. "impala-prod", "dbx-risk-prod").
+                 * When set, Skadi resolves connection details server-side and does NOT require credentials in the request.
+                 */
+                String datasourceId,
+
+                /**
+                 * Optional provider-specific connection properties (non-secret). These are merged with the datasource's
+                 * server-side properties; datasource properties win on conflict.
+                 */
+                Map<String, String> properties
         ) {}
 
         public record Format(

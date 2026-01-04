@@ -3,6 +3,9 @@ package com.dkay229.skadi.query;
 import com.dkay229.skadi.aws.s3.ResultSetToS3ChunkWriter;
 import com.dkay229.skadi.aws.s3.S3AccessLayer;
 import com.dkay229.skadi.aws.s3.S3Models;
+import com.dkay229.skadi.jdbc.SkadiJdbcProperties;
+import com.dkay229.skadi.jdbc.spi.DefaultDriverManagerJdbcConnectionProvider;
+import com.dkay229.skadi.jdbc.spi.JdbcClientFactory;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -34,11 +37,14 @@ class QueryServiceTest {
         QueryRegistry registry = new QueryRegistry();
         ManifestReader mr = Mockito.mock(ManifestReader.class);
 
-        QueryService svc = new QueryService(props, writer, s3, lock, registry, mr, exec);
+        JdbcClientFactory jdbcFactory = new JdbcClientFactory(new SkadiJdbcProperties(),
+                List.of(new DefaultDriverManagerJdbcConnectionProvider()));
+
+        QueryService svc = new QueryService(props, writer, s3, lock, registry, mr, exec, jdbcFactory);
 
         QueryModels.QueryRequest req = new QueryModels.QueryRequest(
                 "my-key",
-                new QueryModels.QueryRequest.Jdbc("jdbc:h2:mem:x", null, null, "select 1", List.of()),
+                new QueryModels.QueryRequest.Jdbc("jdbc:h2:mem:x", null, null, "select 1", List.of(), null, null),
                 new QueryModels.QueryRequest.Format("ndjson", true),
                 null,
                 null
@@ -74,11 +80,14 @@ class QueryServiceTest {
         QueryRegistry registry = new QueryRegistry();
         ManifestReader mr = Mockito.mock(ManifestReader.class);
 
-        QueryService svc = new QueryService(props, writer, s3, lock, registry, mr, exec);
+        JdbcClientFactory jdbcFactory = new JdbcClientFactory(new SkadiJdbcProperties(),
+                List.of(new DefaultDriverManagerJdbcConnectionProvider()));
+
+        QueryService svc = new QueryService(props, writer, s3, lock, registry, mr, exec, jdbcFactory);
 
         QueryModels.QueryRequest req = new QueryModels.QueryRequest(
                 "my-key",
-                new QueryModels.QueryRequest.Jdbc("jdbc:h2:mem:x", null, null, "select 1", List.of()),
+                new QueryModels.QueryRequest.Jdbc("jdbc:h2:mem:x", null, null, "select 1", List.of(), null, null),
                 new QueryModels.QueryRequest.Format("ndjson", true),
                 null,
                 null
