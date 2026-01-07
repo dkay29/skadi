@@ -58,6 +58,7 @@ Skadi follows a layered architecture aligned with standard Spring Boot best prac
 │    (Config, persistence,   │
 │     external integrations) │
 └────────────────────────────┘
+```
 
 ## Architectural Principles
 
@@ -132,7 +133,7 @@ The project structure encourages keeping tests close to the code they validate.
 
 ```bash
 mvn clean spring-boot:run
-
+```
 ---
 
 ## License
