@@ -1,5 +1,9 @@
 # Skadi
 
+Skadi is an open-source project under the Ice Forge umbrella.
+
+Project home: https://ice-forge.org
+
 Skadi is a Java / Spring Boot–based backend service designed to provide a clean, extensible foundation for data-centric services and APIs.  
 It emphasizes clear domain boundaries, testability, and production-ready architecture, making it suitable both for standalone use and as part of a larger enterprise platform.
 
