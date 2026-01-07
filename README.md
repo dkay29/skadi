@@ -58,8 +58,8 @@ Skadi follows a layered architecture aligned with standard Spring Boot best prac
 │    (Config, persistence,   │
 │     external integrations) │
 └────────────────────────────┘
-```
-### Architectural Principles
+
+## Architectural Principles
 
 - **Thin controllers**: HTTP logic only, no business rules
 - **Service-centric logic**: Business behavior lives in services
